@@ -2,13 +2,14 @@ import numpy as np
 import pandas as pd
 import pathlib
 import os
+import time
 
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import train_test_split
 
 
 def import_data(path): 
-    return pd.read_csv(os.path.join(pathlib.Path().resolve(), 'data', 'raw', path))
+    return pd.read_csv(os.path.join(pathlib.Path().resolve(), 'data', 'raw', path), low_memory=False)
 
 def safe_dataframe(df: pd.DataFrame, filename):
     return df.to_csv(os.path.join(pathlib.Path().resolve(), 'data', 'final', filename))
@@ -76,16 +77,19 @@ def data_one_hot_encoding_date(dataframe: pd.DataFrame) -> pd.DataFrame:
     dataframe['day'] = 0
 
     for i, row in dataframe.iterrows():
-        year, month, day = row['date'].split('-')
+        timestamp: pd.Timestamp = row['date']
+        year = timestamp.year
+        month = timestamp.month
+        day = timestamp.day
+
         # Update Date
         dataframe.at[i,'year'] = year
         dataframe.at[i,'month'] = month
         dataframe.at[i,'day'] = day
 
-    #dataframe.drop('date', axis=1, inplace=True)
+    dataframe.drop('date', axis=1, inplace=True)
 
     return dataframe
-
 
 def data_one_hot_encoding(dataframe_raw: pd.DataFrame) -> pd.DataFrame:
     dataframe = dataframe_raw.copy()
@@ -94,17 +98,26 @@ def data_one_hot_encoding(dataframe_raw: pd.DataFrame) -> pd.DataFrame:
     dataframe = data_one_hot_encoding_date(dataframe)
     
     return dataframe
-    
+
 
 if __name__ == '__main__':
+    t0= time.process_time()
+
     dataframe = get_prepared_dataframe()
     dataframe = data_one_hot_encoding(dataframe)
 
+    t1= time.process_time()
+    print('Import and preperation done in: {}'.format(t1 - t0))
+
     safe_dataframe(dataframe, 'data.csv')
-    
+
+    t2= time.process_time()
+    print('Safe to new csv done in: {}'.format(t2 - t1))
+
     # Print
-    dataframe.sort_values(by='date', inplace=True)
+    dataframe.sort_values(['year', 'month', 'day'], inplace=True)
     print(dataframe)
+    
 
 
 

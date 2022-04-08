@@ -3,3 +3,4 @@ data/raw/new/players.csv filter=lfs diff=lfs merge=lfs -text
 data/raw/new/picks.csv filter=lfs diff=lfs merge=lfs -text
 data/raw/new/economy.csv filter=lfs diff=lfs merge=lfs -text
 data/raw/new/results.csv filter=lfs diff=lfs merge=lfs -text
+*.joblib filter=lfs diff=lfs merge=lfs -text

@@ -3,18 +3,25 @@ import pandas as pd
 import pathlib
 import os
 import time
+import joblib
 
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import train_test_split
-
+from src.Dataplot import Dataplot
 
 def import_data(path): 
     return pd.read_csv(os.path.join(pathlib.Path().resolve(), 'data', 'raw', path), low_memory=False)
 
 def safe_dataframe(df: pd.DataFrame, filename):
-    return df.to_csv(os.path.join(pathlib.Path().resolve(), 'data', 'final', filename))
+    return df.to_csv(os.path.join(pathlib.Path().resolve(), 'data', 'final', filename), index=False)
 
-def get_prepared_dataframe() -> pd.DataFrame:
+def safe_randomForest(rf: RandomForestRegressor):
+    joblib.dump(rf, os.path.join(pathlib.Path().resolve(), 'data', 'final', 'random_forest.joblib'))
+
+def load_randomForest():
+    return joblib.load(os.path.join(pathlib.Path().resolve(), 'data', 'final', 'random_forest.joblib'))
+
+def get_prepared_dataframe() -> pd.DataFrame:   
     raw_eco_dataframe = import_data('new\\economy.csv')
     #raw_player_dataframe = import_data('new\\players.csv')
     #raw_pick_dataframe = import_data('new\\picks.csv')
@@ -24,7 +31,12 @@ def get_prepared_dataframe() -> pd.DataFrame:
     results_dataframe = raw_results_dataframe[['date','team_1','team_2','_map','result_1','result_2','map_winner','starting_ct', 'match_id','rank_1','rank_2','map_wins_1','map_wins_2','match_winner']].copy()
 
     df = results_dataframe.join(eco_dataframe.set_index('match_id'), on='match_id')
-    df['best_of'].fillna(value=1, inplace=True)
+
+    # Drop rows with best_of is 'o' or fill with 1 if NaN
+    df['best_of'] = df['best_of'].fillna(1)
+    df.drop(df.loc[df['best_of'] == 'o'].index, inplace=True)    
+    df['best_of'] = df['best_of'].astype(int)
+    
     df['date'] = pd.to_datetime(df['date'])
 
     #new_dataframe = dataframe[['match_date', 'team_1', 'team_2', 't1_points', 't2_points',  't1_world_rank', 't2_world_rank',"t1_h2h_win_perc", "t2_h2h_win_perc", 'winner']].copy()
@@ -100,25 +112,132 @@ def data_one_hot_encoding(dataframe_raw: pd.DataFrame) -> pd.DataFrame:
     return dataframe
 
 
+def train_random_forest(dataframe: pd.DataFrame):
+# Random Forest
+    values_to_predict = np.array(dataframe['map_winner'])
+    
+    # Remove the labels from the features
+    # axis 1 refers to the columns
+    dataframebackup = dataframe
+    dataframe = dataframe.drop('map_winner', axis = 1)
+    dataframe = dataframe.drop('result_1', axis = 1)
+    dataframe = dataframe.drop('result_2', axis = 1)
+    dataframe = dataframe.drop('match_winner', axis = 1)
+
+    # Saving feature names for later use
+    dataframe_list = list(dataframe.columns)
+
+    # Convert to numpy array
+    dataframe_array = np.array(dataframe)
+
+    # Split the data into training and testing sets
+    train_dataset, test_dataset, train_values, test_values = train_test_split(
+        dataframe_array, 
+        values_to_predict, 
+        test_size=0.25, 
+        random_state=66,
+        shuffle=False
+    )
+
+    print('Training Dataset Shape:', train_dataset.shape)
+    print('Training Values Shape:', train_values.shape[0])
+    print('Testing Dataset Shape:', test_dataset.shape)
+    print('Testing Values Shape:', test_values.shape[0])
+    
+    # Instantiate model with 2000 decision trees
+    rf = RandomForestRegressor(
+        n_estimators = 1000,
+        max_depth=25,
+        random_state=42,
+        n_jobs=-1
+    )
+
+    # Train the model on training data
+    rf.fit(train_dataset, train_values)
+
+    safe_randomForest(rf)
+
+    predictions = rf.predict(test_dataset)
+
+    # Calculate the absolute errors
+    errors = abs(predictions - test_values)
+    print('Mean Absolute Error:', round(np.mean(errors), 2), '%.')
+
+    # Calculate mean absolute percentage error (MAPE)
+    mape = 100 * (errors / test_values)
+    
+    # Calculate and display accuracy
+    accuracy = 100 - np.mean(mape)
+    print('Accuracy:', round(accuracy, 2), '%.')
+
+    len_training = train_values.shape[0]
+
+    array_test = np.zeros(len_training)
+    prediction_values = np.concatenate((array_test, predictions), axis=None)
+
+    dataframebackup['predictions'] = pd.Series(prediction_values)
+
+    dataframebackup['predictions'] = dataframebackup['predictions'].round()
+
+
+    excelAnalyse = dataframebackup[['map_winner', 'predictions']].copy()
+    safe_dataframe(excelAnalyse, 'result_prediction.csv')
+
+    
+
+    accuracy = 0
+    # length of dataframe test values, ignore test data
+    length = test_values.shape[0]
+    for _, row in dataframebackup.iterrows():
+        if (row['predictions'] == row['map_winner']):
+            accuracy = accuracy + 1
+
+    # TODO Way to low -> Need some fix 
+    accuracy = accuracy / length
+    print('Accuracy 2:', round(accuracy, 2), '%.')
+
 if __name__ == '__main__':
     t0= time.process_time()
 
-    dataframe = get_prepared_dataframe()
-    dataframe = data_one_hot_encoding(dataframe)
+    # If programm run already load prepaired dataframe
+    if(os.path.exists(os.path.join(pathlib.Path().resolve(), 'data', 'final', 'data.csv'))):
+        dataframe = import_data(os.path.join(pathlib.Path().resolve(), 'data', 'final', 'data.csv'))
+    else:
+        dataframe = get_prepared_dataframe()
+        dataframe = data_one_hot_encoding(dataframe)
+        # Hot encoding teams
+        # dataframe = pd.get_dummies(dataframe, prefix=['team_1', 'team_2'])
+        dataframe['team_1'] = dataframe['team_1'].apply(hash)
+        dataframe['team_2'] = dataframe['team_2'].apply(hash)
+
+        dataframe.sort_values(['year', 'month', 'day'], inplace=True)
+        dataframe = dataframe.reset_index(drop=True)
 
     t1= time.process_time()
     print('Import and preperation done in: {}'.format(t1 - t0))
-
     safe_dataframe(dataframe, 'data.csv')
 
     t2= time.process_time()
-    print('Safe to new csv done in: {}'.format(t2 - t1))
+    print('Safe to new csv done in: {}'.format(t2 - t1))  
 
-    # Print
-    dataframe.sort_values(['year', 'month', 'day'], inplace=True)
-    print(dataframe)
-    
+    train_random_forest(dataframe)
 
+
+    # dp = Dataplot(
+    #     dataframe['year'].tolist(),
+    #     dataframe['month'].tolist(),
+    #     dataframe['day'].tolist(),
+    #     'map_winner',
+    #     values_to_predict,
+    #     test_dataset[:, dataframe_list.index('year')],
+    #     test_dataset[:, dataframe_list.index('month')],
+    #     test_dataset[:, dataframe_list.index('day')],
+    #     predictions,
+    #     78047
+    # )
+
+    # dp.create_plot()
+    # dp.show(labelx='Date', labely='map_winner', title='TBD')
 
 
 

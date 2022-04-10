@@ -9,17 +9,21 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import train_test_split
 from src.Dataplot import Dataplot
 
+
+RANDOM_FOREST_SAVE_FILE = 'random_forest.joblib'
+
+
 def import_data(path): 
-    return pd.read_csv(os.path.join(pathlib.Path().resolve(), 'data', 'raw', path), low_memory=False)
+    return pd.read_csv(os.path.join(pathlib.Path().resolve(), 'data', 'raw', path), low_memory=False, )
 
 def safe_dataframe(df: pd.DataFrame, filename):
     return df.to_csv(os.path.join(pathlib.Path().resolve(), 'data', 'final', filename), index=False)
 
 def safe_randomForest(rf: RandomForestRegressor):
-    joblib.dump(rf, os.path.join(pathlib.Path().resolve(), 'data', 'final', 'random_forest.joblib'))
+    joblib.dump(rf, os.path.join(pathlib.Path().resolve(), 'data', 'final', RANDOM_FOREST_SAVE_FILE))
 
 def load_randomForest():
-    return joblib.load(os.path.join(pathlib.Path().resolve(), 'data', 'final', 'random_forest.joblib'))
+    return joblib.load(os.path.join(pathlib.Path().resolve(), 'data', 'final', RANDOM_FOREST_SAVE_FILE))
 
 def get_prepared_dataframe() -> pd.DataFrame:   
     raw_eco_dataframe = import_data('new\\economy.csv')
@@ -108,9 +112,18 @@ def data_one_hot_encoding(dataframe_raw: pd.DataFrame) -> pd.DataFrame:
     
     dataframe = data_one_hot_encoding_maps(dataframe)
     dataframe = data_one_hot_encoding_date(dataframe)
+
+    # Encoding teams (Integer Encoding)
+    dataframe['team_1'] = dataframe['team_1'].apply(hash)
+    dataframe['team_2'] = dataframe['team_2'].apply(hash)
+
+
+    # Sort dataframe in year month day, Random forest later will shuffle this data
+    # just for better export and readability
+    dataframe.sort_values(['year', 'month', 'day'], inplace=True)
+    dataframe = dataframe.reset_index(drop=True)
     
     return dataframe
-
 
 def train_random_forest(dataframe: pd.DataFrame):
 # Random Forest
@@ -131,10 +144,11 @@ def train_random_forest(dataframe: pd.DataFrame):
     dataframe_array = np.array(dataframe)
 
     # Split the data into training and testing sets
+    # test_size = all games played in 2020
     train_dataset, test_dataset, train_values, test_values = train_test_split(
         dataframe_array, 
         values_to_predict, 
-        test_size=0.25, 
+        test_size=0.0440503798992915, 
         random_state=66,
         shuffle=False
     )
@@ -144,57 +158,39 @@ def train_random_forest(dataframe: pd.DataFrame):
     print('Testing Dataset Shape:', test_dataset.shape)
     print('Testing Values Shape:', test_values.shape[0])
     
-    # Instantiate model with 2000 decision trees
+    # Instantiate model with 1000 decision trees
     rf = RandomForestRegressor(
         n_estimators = 1000,
         max_depth=25,
-        random_state=42,
+        random_state=245,
         n_jobs=-1
     )
 
-    # Train the model on training data
+    # Train the model on training data and safe it to file
     rf.fit(train_dataset, train_values)
-
     safe_randomForest(rf)
-
+    
+    # Create Predictions    
     predictions = rf.predict(test_dataset)
 
-    # Calculate the absolute errors
-    errors = abs(predictions - test_values)
-    print('Mean Absolute Error:', round(np.mean(errors), 2), '%.')
-
-    # Calculate mean absolute percentage error (MAPE)
-    mape = 100 * (errors / test_values)
-    
-    # Calculate and display accuracy
-    accuracy = 100 - np.mean(mape)
-    print('Accuracy:', round(accuracy, 2), '%.')
-
+    # create new dataframe with predictions
     len_training = train_values.shape[0]
-
     array_test = np.zeros(len_training)
     prediction_values = np.concatenate((array_test, predictions), axis=None)
-
     dataframebackup['predictions'] = pd.Series(prediction_values)
-
     dataframebackup['predictions'] = dataframebackup['predictions'].round()
+    dataframebackup['predictions'] = dataframebackup['predictions'].astype(int)
+    safe_dataframe(dataframebackup, 'result_prediction.csv')
 
-
-    excelAnalyse = dataframebackup[['map_winner', 'predictions']].copy()
-    safe_dataframe(excelAnalyse, 'result_prediction.csv')
-
-    
-
+    # Generate accuracy of predictions
     accuracy = 0
     # length of dataframe test values, ignore test data
     length = test_values.shape[0]
     for _, row in dataframebackup.iterrows():
-        if (row['predictions'] == row['map_winner']):
+        if (row['map_winner']  == row['predictions']):
             accuracy = accuracy + 1
-
-    # TODO Way to low -> Need some fix 
-    accuracy = accuracy / length
-    print('Accuracy 2:', round(accuracy, 2), '%.')
+    percentage = (accuracy / length) * 100
+    print('Accuracy:', round(percentage, 2), '%.')    
 
 if __name__ == '__main__':
     t0= time.process_time()
@@ -205,13 +201,6 @@ if __name__ == '__main__':
     else:
         dataframe = get_prepared_dataframe()
         dataframe = data_one_hot_encoding(dataframe)
-        # Hot encoding teams
-        # dataframe = pd.get_dummies(dataframe, prefix=['team_1', 'team_2'])
-        dataframe['team_1'] = dataframe['team_1'].apply(hash)
-        dataframe['team_2'] = dataframe['team_2'].apply(hash)
-
-        dataframe.sort_values(['year', 'month', 'day'], inplace=True)
-        dataframe = dataframe.reset_index(drop=True)
 
     t1= time.process_time()
     print('Import and preperation done in: {}'.format(t1 - t0))
@@ -221,23 +210,6 @@ if __name__ == '__main__':
     print('Safe to new csv done in: {}'.format(t2 - t1))  
 
     train_random_forest(dataframe)
-
-
-    # dp = Dataplot(
-    #     dataframe['year'].tolist(),
-    #     dataframe['month'].tolist(),
-    #     dataframe['day'].tolist(),
-    #     'map_winner',
-    #     values_to_predict,
-    #     test_dataset[:, dataframe_list.index('year')],
-    #     test_dataset[:, dataframe_list.index('month')],
-    #     test_dataset[:, dataframe_list.index('day')],
-    #     predictions,
-    #     78047
-    # )
-
-    # dp.create_plot()
-    # dp.show(labelx='Date', labely='map_winner', title='TBD')
 
 
 

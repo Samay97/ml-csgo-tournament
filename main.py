@@ -11,6 +11,7 @@ from src.Dataplot import Dataplot
 
 
 RANDOM_FOREST_SAVE_FILE = 'random_forest.joblib'
+BACKUP_HASH_TO_TEAM_NAME = {}
 
 
 def import_data(path): 
@@ -114,9 +115,23 @@ def data_one_hot_encoding(dataframe_raw: pd.DataFrame) -> pd.DataFrame:
     dataframe = data_one_hot_encoding_date(dataframe)
 
     # Encoding teams (Integer Encoding)
+    global BACKUP_HASH_TO_TEAM_NAME
+    BACKUP_TEAM_NAMES = np.concatenate(
+        (dataframe['team_1'].unique(), dataframe['team_2'].unique()), 
+        axis=None
+    )
     dataframe['team_1'] = dataframe['team_1'].apply(hash)
     dataframe['team_2'] = dataframe['team_2'].apply(hash)
 
+    TEAM_HASHES = np.concatenate(
+        (dataframe['team_1'].unique(), dataframe['team_2'].unique()), 
+        axis=None
+    )
+
+    BACKUP_HASH_TO_TEAM_NAME = dict(zip(TEAM_HASHES, BACKUP_TEAM_NAMES))
+
+    # Remove all entires that exisit more than once
+    dataframe = dataframe.drop_duplicates()
 
     # Sort dataframe in year month day, Random forest later will shuffle this data
     # just for better export and readability
@@ -146,9 +161,9 @@ def train_random_forest(dataframe: pd.DataFrame):
     # Split the data into training and testing sets
     # test_size = all games played in 2020
     train_dataset, test_dataset, train_values, test_values = train_test_split(
-        dataframe_array, 
-        values_to_predict, 
-        test_size=0.0440503798992915, 
+        dataframe_array,
+        values_to_predict,
+        test_size=0.042975,
         random_state=66,
         shuffle=False
     )
@@ -180,6 +195,14 @@ def train_random_forest(dataframe: pd.DataFrame):
     dataframebackup['predictions'] = pd.Series(prediction_values)
     dataframebackup['predictions'] = dataframebackup['predictions'].round()
     dataframebackup['predictions'] = dataframebackup['predictions'].astype(int)
+
+
+    # Revert team hash to name
+    global BACKUP_HASH_TO_TEAM_NAME
+    dataframebackup['team_1'] = dataframebackup['team_1'].apply(lambda x: BACKUP_HASH_TO_TEAM_NAME[x])
+    dataframebackup['team_2'] = dataframebackup['team_2'].apply(lambda x: BACKUP_HASH_TO_TEAM_NAME[x])
+
+
     safe_dataframe(dataframebackup, 'result_prediction.csv')
 
     # Generate accuracy of predictions
@@ -196,11 +219,11 @@ if __name__ == '__main__':
     t0= time.process_time()
 
     # If programm run already load prepaired dataframe
-    if(os.path.exists(os.path.join(pathlib.Path().resolve(), 'data', 'final', 'data.csv'))):
-        dataframe = import_data(os.path.join(pathlib.Path().resolve(), 'data', 'final', 'data.csv'))
-    else:
-        dataframe = get_prepared_dataframe()
-        dataframe = data_one_hot_encoding(dataframe)
+    #if(os.path.exists(os.path.join(pathlib.Path().resolve(), 'data', 'final', 'data.csv'))):
+    #    dataframe = import_data(os.path.join(pathlib.Path().resolve(), 'data', 'final', 'data.csv'))
+    #else:
+    dataframe = get_prepared_dataframe()
+    dataframe = data_one_hot_encoding(dataframe)
 
     t1= time.process_time()
     print('Import and preperation done in: {}'.format(t1 - t0))
@@ -210,8 +233,6 @@ if __name__ == '__main__':
     print('Safe to new csv done in: {}'.format(t2 - t1))  
 
     train_random_forest(dataframe)
-
-
 
 
 # Dataset

@@ -4,10 +4,10 @@ import pathlib
 import os
 import time
 import joblib
+import multiprocessing
 
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import train_test_split
-from src.Dataplot import Dataplot
 
 
 RANDOM_FOREST_SAVE_FILE = 'random_forest.joblib'
@@ -26,25 +26,31 @@ def safe_randomForest(rf: RandomForestRegressor):
 def load_randomForest():
     return joblib.load(os.path.join(pathlib.Path().resolve(), 'data', 'final', RANDOM_FOREST_SAVE_FILE))
 
-def get_prepared_dataframe() -> pd.DataFrame:   
+def get_prepared_dataframe() -> pd.DataFrame:
+    '''
+    Importiert die benötigten Daten und erstellt ein Dataframe, welches alle nebötigten Daten beinhaltet.
+    '''
     raw_eco_dataframe = import_data('new\\economy.csv')
+    raw_results_dataframe = import_data('new\\results.csv')
     #raw_player_dataframe = import_data('new\\players.csv')
     #raw_pick_dataframe = import_data('new\\picks.csv')
-    raw_results_dataframe = import_data('new\\results.csv')
     
+    # Copiert das Dataframe mit den benötigten Spalten
     eco_dataframe = raw_eco_dataframe[[ 'match_id', 'best_of']].copy()
     results_dataframe = raw_results_dataframe[['date','team_1','team_2','_map','result_1','result_2','map_winner','starting_ct', 'match_id','rank_1','rank_2','map_wins_1','map_wins_2','match_winner']].copy()
 
+    # Verbinde beide Dataframes mit einem jopin über die match_id
     df = results_dataframe.join(eco_dataframe.set_index('match_id'), on='match_id')
 
-    # Drop rows with best_of is 'o' or fill with 1 if NaN
+    # Drop Rows mit best_of == 'o' oder fülle es mit 1 wenn es NaN ist
+    # best_of (Ist eine angabe wie viele Spiele gespielt werden bis ein Sieger bestimmt ist. 
+    # Z.b best_of 3 werden 3 Spiele gespielt und der Gewinner ist der, mit den meisten Siegen)
     df['best_of'] = df['best_of'].fillna(1)
     df.drop(df.loc[df['best_of'] == 'o'].index, inplace=True)    
     df['best_of'] = df['best_of'].astype(int)
     
+    # date sollte vom datentyp datetime sein
     df['date'] = pd.to_datetime(df['date'])
-
-    #new_dataframe = dataframe[['match_date', 'team_1', 'team_2', 't1_points', 't2_points',  't1_world_rank', 't2_world_rank',"t1_h2h_win_perc", "t2_h2h_win_perc", 'winner']].copy()
     return df
 
 def data_one_hot_encoding_maps(dataframe: pd.DataFrame) -> pd.DataFrame:
@@ -108,12 +114,7 @@ def data_one_hot_encoding_date(dataframe: pd.DataFrame) -> pd.DataFrame:
 
     return dataframe
 
-def data_one_hot_encoding(dataframe_raw: pd.DataFrame) -> pd.DataFrame:
-    dataframe = dataframe_raw.copy()
-    
-    dataframe = data_one_hot_encoding_maps(dataframe)
-    dataframe = data_one_hot_encoding_date(dataframe)
-
+def integer_encode_teams(dataframe: pd.DataFrame) -> pd.DataFrame:
     # Encoding teams (Integer Encoding)
     global BACKUP_HASH_TO_TEAM_NAME
     BACKUP_TEAM_NAMES = np.concatenate(
@@ -129,19 +130,37 @@ def data_one_hot_encoding(dataframe_raw: pd.DataFrame) -> pd.DataFrame:
     )
 
     BACKUP_HASH_TO_TEAM_NAME = dict(zip(TEAM_HASHES, BACKUP_TEAM_NAMES))
+    return dataframe
 
-    # Remove all entires that exisit more than once
-    dataframe = dataframe.drop_duplicates()
-
-    # Sort dataframe in year month day, Random forest later will shuffle this data
-    # just for better export and readability
-    dataframe.sort_values(['year', 'month', 'day'], inplace=True)
-    dataframe = dataframe.reset_index(drop=True)
+def data_one_hot_encoding(dataframe_raw: pd.DataFrame) -> pd.DataFrame:
+    '''https://machinelearningmastery.com/why-one-hot-encode-data-in-machine-learning/
+    Random forest require all input variables and output variables to be numeric
+    Convert dataframe to a numeric dataframe with encoding
+    one hot encode maps and date
+    integer encode teams (hashing)
+    '''
+    dataframe = dataframe_raw.copy()
+    
+    dataframe = data_one_hot_encoding_maps(dataframe)
+    dataframe = data_one_hot_encoding_date(dataframe)
+    dataframe = integer_encode_teams(dataframe)
     
     return dataframe
 
+def drop_duplicates_and_sort(dataframe: pd.DataFrame) -> pd.DataFrame:
+    new_dataframe = dataframe.copy()
+    # Remove all entires that exisit more than once
+    new_dataframe = new_dataframe.drop_duplicates()
+
+    # Sort dataframe in year month day, Random forest later will shuffle this data
+    # just for better export and readability
+    new_dataframe.sort_values(['year', 'month', 'day'], inplace=True)
+    new_dataframe = new_dataframe.reset_index(drop=True)
+    return new_dataframe
+
 def train_random_forest(dataframe: pd.DataFrame):
-# Random Forest
+    
+    # Werte die Vorhergesagt werden sollen
     values_to_predict = np.array(dataframe['map_winner'])
     
     # Remove the labels from the features
@@ -151,9 +170,6 @@ def train_random_forest(dataframe: pd.DataFrame):
     dataframe = dataframe.drop('result_1', axis = 1)
     dataframe = dataframe.drop('result_2', axis = 1)
     dataframe = dataframe.drop('match_winner', axis = 1)
-
-    # Saving feature names for later use
-    dataframe_list = list(dataframe.columns)
 
     # Convert to numpy array
     dataframe_array = np.array(dataframe)
@@ -167,17 +183,11 @@ def train_random_forest(dataframe: pd.DataFrame):
         random_state=66,
         shuffle=False
     )
-
-    print('Training Dataset Shape:', train_dataset.shape)
-    print('Training Values Shape:', train_values.shape[0])
-    print('Testing Dataset Shape:', test_dataset.shape)
-    print('Testing Values Shape:', test_values.shape[0])
     
     # Instantiate model with 1000 decision trees
     rf = RandomForestRegressor(
         n_estimators = 1000,
         max_depth=25,
-        random_state=245,
         n_jobs=-1
     )
 
@@ -185,6 +195,9 @@ def train_random_forest(dataframe: pd.DataFrame):
     rf.fit(train_dataset, train_values)
     safe_randomForest(rf)
     
+    return rf, test_dataset, train_values, dataframebackup, test_values
+
+def predict_2020_games(rf, test_dataset, train_values, dataframebackup, test_values):
     # Create Predictions    
     predictions = rf.predict(test_dataset)
 
@@ -198,10 +211,8 @@ def train_random_forest(dataframe: pd.DataFrame):
 
 
     # Revert team hash to name
-    global BACKUP_HASH_TO_TEAM_NAME
     dataframebackup['team_1'] = dataframebackup['team_1'].apply(lambda x: BACKUP_HASH_TO_TEAM_NAME[x])
     dataframebackup['team_2'] = dataframebackup['team_2'].apply(lambda x: BACKUP_HASH_TO_TEAM_NAME[x])
-
 
     safe_dataframe(dataframebackup, 'result_prediction.csv')
 
@@ -213,26 +224,32 @@ def train_random_forest(dataframe: pd.DataFrame):
         if (row['map_winner']  == row['predictions']):
             accuracy = accuracy + 1
     percentage = (accuracy / length) * 100
-    print('Accuracy:', round(percentage, 2), '%.')    
+    print('Accuracy:', round(percentage, 2), '%.')
+
 
 if __name__ == '__main__':
+    # Zeit Messung
     t0= time.process_time()
 
-    # If programm run already load prepaired dataframe
-    #if(os.path.exists(os.path.join(pathlib.Path().resolve(), 'data', 'final', 'data.csv'))):
-    #    dataframe = import_data(os.path.join(pathlib.Path().resolve(), 'data', 'final', 'data.csv'))
-    #else:
     dataframe = get_prepared_dataframe()
     dataframe = data_one_hot_encoding(dataframe)
+    dataframe = drop_duplicates_and_sort(dataframe)
 
     t1= time.process_time()
+    
     print('Import and preperation done in: {}'.format(t1 - t0))
+    
     safe_dataframe(dataframe, 'data.csv')
 
+    random_forest, test_dataset, train_values, dataframebackup, test_values = train_random_forest(dataframe)
+    
     t2= time.process_time()
-    print('Safe to new csv done in: {}'.format(t2 - t1))  
+    print('Train random forest done in: {}'.format((t2 - t1) / multiprocessing.cpu_count()))
 
-    train_random_forest(dataframe)
+    predict_2020_games(random_forest, test_dataset, train_values, dataframebackup, test_values)
+
+    t3= time.process_time()
+    print('Prediction done in: {}'.format(t3 - t2))
 
 
 # Dataset
@@ -260,170 +277,3 @@ if __name__ == '__main__':
 # rating at least one perc: share of played matches where the player had at least 1.0 rating.
 # is sniper: boolean indicating if the player has the "awp"(sniper) as his first or second weapon with most kills.
 # clutch win perc: conversion rate from the player on one vs one situations.
-
-# Columns
-# match_date, 
-# team_1,
-# team_2,
-# t1_points,
-# t2_points,
-# t1_world_rank,
-# t2_world_rank,
-# t1_h2h_win_perc,
-# t2_h2h_win_perc,
-# winner,
-# t1_player1_rating,
-# t1_player1_impact,
-# t1_player1_kdr,
-# t1_player1_dmr,
-# t1_player1_kpr,
-# t1_player1_apr,
-# t1_player1_dpr,
-# t1_player1_spr,
-# t1_player1_opk_ratio,
-# t1_player1_opk_rating,
-# t1_player1_wins_perc_after_fk,
-# t1_player1_fk_perc_in_wins,
-# t1_player1_multikill_perc,
-# t1_player1_rating_at_least_one_perc,
-# t1_player1_is_sniper,
-# t1_player1_clutch_win_perc,
-# t1_player2_rating,
-# t1_player2_impact,
-# t1_player2_kdr,
-# t1_player2_dmr,
-# t1_player2_kpr,
-# t1_player2_apr,
-# t1_player2_dpr,
-# t1_player2_spr,
-# t1_player2_opk_ratio,
-# t1_player2_opk_rating,
-# t1_player2_wins_perc_after_fk,
-# t1_player2_fk_perc_in_wins,
-# t1_player2_multikill_perc,
-# t1_player2_rating_at_least_one_perc,
-# t1_player2_is_sniper,
-# t1_player2_clutch_win_perc,
-# t1_player3_rating,
-# t1_player3_impact,
-# t1_player3_kdr,
-# t1_player3_dmr,
-# t1_player3_kpr,
-# t1_player3_apr,
-# t1_player3_dpr,
-# t1_player3_spr,
-# t1_player3_opk_ratio,
-# t1_player3_opk_rating,
-# t1_player3_wins_perc_after_fk,
-# t1_player3_fk_perc_in_wins,
-# t1_player3_multikill_perc,
-# t1_player3_rating_at_least_one_perc,
-# t1_player3_is_sniper,
-# t1_player3_clutch_win_perc,
-# t1_player4_rating,
-# t1_player4_impact,
-# t1_player4_kdr,
-# t1_player4_dmr,
-# t1_player4_kpr,
-# t1_player4_apr,
-# t1_player4_dpr,
-# t1_player4_spr,
-# t1_player4_opk_ratio,
-# t1_player4_opk_rating,
-# t1_player4_wins_perc_after_fk,
-# t1_player4_fk_perc_in_wins,
-# t1_player4_multikill_perc,
-# t1_player4_rating_at_least_one_perc,
-# t1_player4_is_sniper,
-# t1_player4_clutch_win_perc,
-# t1_player5_rating,
-# t1_player5_impact,
-# t1_player5_kdr,
-# t1_player5_dmr,
-# t1_player5_kpr,
-# t1_player5_apr,
-# t1_player5_dpr,
-# t1_player5_spr,
-# t1_player5_opk_ratio,
-# t1_player5_opk_rating,
-# t1_player5_wins_perc_after_fk,
-# t1_player5_fk_perc_in_wins,
-# t1_player5_multikill_perc,
-# t1_player5_rating_at_least_one_perc,
-# t1_player5_is_sniper,
-# t1_player5_clutch_win_perc,
-# t2_player1_rating,
-# t2_player1_impact,
-# t2_player1_kdr,
-# t2_player1_dmr,
-# t2_player1_kpr,
-# t2_player1_apr,
-# t2_player1_dpr,
-# t2_player1_spr,
-# t2_player1_opk_ratio,
-# t2_player1_opk_rating,
-# t2_player1_wins_perc_after_fk,
-# t2_player1_fk_perc_in_wins,
-# t2_player1_multikill_perc,
-# t2_player1_rating_at_least_one_perc,
-# t2_player1_is_sniper,
-# t2_player1_clutch_win_perc,
-# t2_player2_rating,t2_player2_impact,
-# t2_player2_kdr,t2_player2_dmr,
-# t2_player2_kpr,t2_player2_apr,
-# t2_player2_dpr,t2_player2_spr,
-# t2_player2_opk_ratio,
-# t2_player2_opk_rating,
-# t2_player2_wins_perc_after_fk,
-# t2_player2_fk_perc_in_wins,
-# t2_player2_multikill_perc,
-# t2_player2_rating_at_least_one_perc,
-# t2_player2_is_sniper,
-# t2_player2_clutch_win_perc,
-# t2_player3_rating,
-# t2_player3_impact,
-# t2_player3_kdr,
-# t2_player3_dmr,
-# t2_player3_kpr,
-# t2_player3_apr,
-# t2_player3_dpr,
-# t2_player3_spr,
-# t2_player3_opk_ratio,
-# t2_player3_opk_rating,
-# t2_player3_wins_perc_after_fk,
-# t2_player3_fk_perc_in_wins,
-# t2_player3_multikill_perc,
-# t2_player3_rating_at_least_one_perc,
-# t2_player3_is_sniper,
-# t2_player3_clutch_win_perc,
-# t2_player4_rating,
-# t2_player4_impact,
-# t2_player4_kdr,
-# t2_player4_dmr,
-# t2_player4_kpr,
-# t2_player4_apr,
-# t2_player4_dpr,t2_player4_spr,
-# t2_player4_opk_ratio,
-# t2_player4_opk_rating,
-# t2_player4_wins_perc_after_fk,
-# t2_player4_fk_perc_in_wins,
-# t2_player4_multikill_perc,
-# t2_player4_rating_at_least_one_perc,
-# t2_player4_is_sniper,
-# t2_player4_clutch_win_perc,
-# t2_player5_rating,
-# t2_player5_impact,
-# t2_player5_kdr,
-# t2_player5_dmr,
-# t2_player5_kpr,
-# t2_player5_apr,
-# t2_player5_dpr,
-# t2_player5_spr,
-# t2_player5_opk_ratio,
-# t2_player5_opk_rating,
-# t2_player5_wins_perc_after_fk,
-# t2_player5_fk_perc_in_wins,
-# t2_player5_multikill_perc,
-# t2_player5_rating_at_least_one_perc,
-# t2_player5_is_sniper,
-# t2_player5_clutch_win_perc

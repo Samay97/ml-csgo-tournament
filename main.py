@@ -136,6 +136,7 @@ def data_one_hot_encoding(dataframe_raw: pd.DataFrame) -> pd.DataFrame:
     '''https://machinelearningmastery.com/why-one-hot-encode-data-in-machine-learning/
     Random forest require all input variables and output variables to be numeric
     Convert dataframe to a numeric dataframe with encoding
+    For categorical variables where no such ordinal relationship exists, the integer encoding is not enough
     one hot encode maps and date
     integer encode teams (hashing)
     '''
@@ -193,7 +194,12 @@ def train_random_forest(dataframe: pd.DataFrame):
 
     # Train the model on training data and safe it to file
     rf.fit(train_dataset, train_values)
-    safe_randomForest(rf)
+    #safe_randomForest(rf)
+
+    # print most important features
+    #importances = pd.DataFrame({'feature': dataframe.columns, 'importance':np.round(rf.feature_importances_,3)})
+    #importances = importances.sort_values('importance',ascending=False).set_index('feature')
+    #print(importances.head(20))
     
     return rf, test_dataset, train_values, dataframebackup, test_values
 
@@ -229,13 +235,13 @@ def predict_2020_games(rf, test_dataset, train_values, dataframebackup, test_val
 
 if __name__ == '__main__':
     # Zeit Messung
-    t0= time.process_time()
+    t0 = time.process_time()
 
     dataframe = get_prepared_dataframe()
     dataframe = data_one_hot_encoding(dataframe)
     dataframe = drop_duplicates_and_sort(dataframe)
 
-    t1= time.process_time()
+    t1 = time.process_time()
     
     print('Import and preperation done in: {}'.format(t1 - t0))
     
@@ -243,12 +249,12 @@ if __name__ == '__main__':
 
     random_forest, test_dataset, train_values, dataframebackup, test_values = train_random_forest(dataframe)
     
-    t2= time.process_time()
+    t2 = time.process_time()
     print('Train random forest done in: {}'.format((t2 - t1) / multiprocessing.cpu_count()))
 
     predict_2020_games(random_forest, test_dataset, train_values, dataframebackup, test_values)
 
-    t3= time.process_time()
+    t3 = time.process_time()
     print('Prediction done in: {}'.format(t3 - t2))
 
 

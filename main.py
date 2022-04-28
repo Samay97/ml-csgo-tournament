@@ -183,7 +183,7 @@ def train_random_forest(dataframe: pd.DataFrame):
         dataframe_array,
         values_to_predict,
         test_size=0.042975,
-        random_state=66,
+        random_state=234,
         shuffle=False
     )
 
@@ -202,7 +202,7 @@ def train_random_forest(dataframe: pd.DataFrame):
     #print(search.best_params_)
     
     # Instantiate model with 1000 decision trees
-    rf = RandomForestRegressor(
+    rf = RandomForestClassifier(
         n_estimators=100,
         max_depth=12,
         n_jobs=-1

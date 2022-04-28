@@ -6,8 +6,10 @@ import time
 import joblib
 import multiprocessing
 
-from sklearn.ensemble import RandomForestRegressor
-from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
+from sklearn.model_selection import GridSearchCV
+from sklearn.metrics import make_scorer, accuracy_score
+from sklearn.model_selection import ParameterGrid, train_test_split
 
 
 RANDOM_FOREST_SAVE_FILE = 'random_forest.joblib'
@@ -184,11 +186,25 @@ def train_random_forest(dataframe: pd.DataFrame):
         random_state=66,
         shuffle=False
     )
+
+    # find optimal paramters
+    #search = GridSearchCV(
+    #        estimator=RandomForestClassifier(),
+    #        scoring=make_scorer(accuracy_score),
+    #        param_grid={
+    #                'n_estimators': [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,20,25,30,35,40,45,55,60,65,70,100],
+    #                'max_depth': [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20],
+    #        },
+    #        n_jobs=-1
+    #    )
+
+    #search.fit(train_dataset, train_values)
+    #print(search.best_params_)
     
     # Instantiate model with 1000 decision trees
     rf = RandomForestRegressor(
-        n_estimators = 1000,
-        max_depth=25,
+        n_estimators=100,
+        max_depth=12,
         n_jobs=-1
     )
 
@@ -197,9 +213,9 @@ def train_random_forest(dataframe: pd.DataFrame):
     #safe_randomForest(rf)
 
     # print most important features
-    #importances = pd.DataFrame({'feature': dataframe.columns, 'importance':np.round(rf.feature_importances_,3)})
-    #importances = importances.sort_values('importance',ascending=False).set_index('feature')
-    #print(importances.head(20))
+    # importances = pd.DataFrame({'feature': dataframe.columns, 'importance':np.round(rf.feature_importances_,3)})
+    # importances = importances.sort_values('importance',ascending=False).set_index('feature')
+    # print(importances.head(20))
     
     return rf, test_dataset, train_values, dataframebackup, test_values
 
@@ -260,6 +276,7 @@ if __name__ == '__main__':
 
 # Dataset
 # https://www.kaggle.com/datasets/d3340095e128fb4e923b22b82b7ab97d134e40b9dea2d09e554d77a53ae7a768?resource=download
+# https://www.kaggle.com/datasets/mateusdmachado/csgo-professional-matches
 
 
 # Meaning of Column Names
